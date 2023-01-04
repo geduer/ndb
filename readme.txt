@@ -31,4 +31,6 @@ Please find more information at:
 http://nanocode.cn
 http://advdbg.org/gdk
 
-Contacts: yinkui.zhang@xedge.ai
+Contacts:
+yinkui.zhang@nanocode.cn
+zhiqiang.chunyu@nanocode.cn
