@@ -1,4 +1,4 @@
-NDB Module for Nano Deubgger rev1.0
+NDB Module for Nano Deubgger rev 1.8
 
 NDB is a part of Nano Debugger, which is developed by GEDU Lab. NDB provides following
 services to NDB:
