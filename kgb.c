@@ -13,12 +13,26 @@ Author: GEDU Shanghai Lab(GSL)
 #include <asm/io.h>
 #include <linux/highmem.h>
 #include <linux/list.h>
-#include <linux/kallsyms.h>
 #include <linux/vmalloc.h>
 #include <linux/utsname.h>
+#include <linux/version.h>
 #include "kgb.h"
 #include "mailbox.h"
 #include "dbgrdata.h"
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+#define KPROBE_LOOKUP 1
+#include <linux/kprobes.h>
+static struct kprobe kp = {
+    .symbol_name = "kallsyms_lookup_name"
+};
+typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
+kallsyms_lookup_name_t kallsyms_lookup_name_ptr;
+#define KFN_PTR kallsyms_lookup_name_ptr // to avoid the annoying name conflict
+#else
+#include <linux/kallsyms.h>
+#define KFN_PTR kallsyms_lookup_name
+#endif
 
 /////////////////////////////////////////////////////////////////
 extern  ndb_mailbox_t* g_ptr_mailbox;
@@ -59,7 +73,13 @@ static void* kgb_orig_modules_head(long module_addr)
     struct module* mod;
     struct  list_head* next, * list_head_orig;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+    typedef struct module *(*__module_address_t)(unsigned long addr);
+    __module_address_t pfn = (__module_address_t)KFN_PTR("__module_address");
+    mod = pfn(module_addr);
+#else
     mod = __module_address(module_addr);
+#endif
     list_head_orig = mod->list.prev;
     next = list_head_orig->next;
 
@@ -70,7 +90,7 @@ static void* kgb_orig_modules_head(long module_addr)
 
 static unsigned long kgb_kernel_base(void)
 {
-    return kallsyms_lookup_name(
+    return KFN_PTR(
 #ifdef CONFIG_X86
 	"_text"
 #else
@@ -81,9 +101,9 @@ static unsigned long kgb_kernel_base(void)
 
 static unsigned long kgb_kernel_length(unsigned long base)
 {
-    long end = kallsyms_lookup_name("__bss_stop"); 
+    long end = KFN_PTR("__bss_stop"); 
     if(end == 0) {
-        end = kallsyms_lookup_name("_etext"); // for arm64, no bss_stop, try _etext
+        end = KFN_PTR("_etext"); // for arm64, no bss_stop, try _etext
     }
     return end - base;
 }
@@ -120,8 +140,8 @@ static int kgb_init_syspara(ptr_ndb_syspara_t psyspara, long module_addr)
     ndb_os_struct_sym* sym = &psyspara->kernelstructs_;
 
     g_module_head_orig = (struct list_head*)kgb_orig_modules_head(module_addr);
-    log_buf_get = (log_buf_addr_get_t)kallsyms_lookup_name("log_buf_addr_get");
-    log_len_get = (log_buf_len_get_t)kallsyms_lookup_name("log_buf_len_get");
+    log_buf_get = (log_buf_addr_get_t)KFN_PTR("log_buf_addr_get");
+    log_len_get = (log_buf_len_get_t)KFN_PTR("log_buf_len_get");
     for_each_online_cpu(total_cpu);
     total_cpu = num_online_cpus();
     psyspara->ndp_markera_ = NDP_MARKER_A;
@@ -145,20 +165,20 @@ static int kgb_init_syspara(ptr_ndb_syspara_t psyspara, long module_addr)
     psyspara->percpu_offset_ = (uint64_t)__per_cpu_offset;
     psyspara->debugger_data_list_head_ = (uint64_t)&g_dbgrdatalist;
     psyspara->mailbox_base_ = (uint64_t)g_ptr_mailbox;
-    psyspara->phys_base_ = kallsyms_lookup_name("phys_base");
+    psyspara->phys_base_ = KFN_PTR("phys_base");
     psyspara->init_uts_ns_ = (uint64_t)&init_uts_ns;
-    psyspara->vvar_page_ = kallsyms_lookup_name("__vvar_page");
+    psyspara->vvar_page_ = KFN_PTR("__vvar_page");
 #ifdef CONFIG_X86
 #else
-    psyspara->entry_task_ = kallsyms_lookup_name("__entry_task");
+    psyspara->entry_task_ = KFN_PTR("__entry_task");
     psyspara->ver_major = 4;
     psyspara->ver_minor = 19;
     psyspara->ver_revison = 161;
     psyspara->ver_distributor = 0;
     psyspara->uptime_ = ktime_get_mono_fast_ns();
 #ifdef CONFIG_NDB
-    psyspara->total_forks_ = kallsyms_lookup_name("total_forks");
-    psyspara->nr_threads_ = kallsyms_lookup_name("nr_threads");
+    psyspara->total_forks_ = KFN_PTR("total_forks");
+    psyspara->nr_threads_ = KFN_PTR("nr_threads");
 #else
     psyspara->total_forks_ = total_forks; // global variable from linux/sched/stat.h
     psyspara->nr_threads_ = nr_threads; // global variable from linux/sched/stat.h
@@ -186,7 +206,7 @@ static int kgb_init_syspara(ptr_ndb_syspara_t psyspara, long module_addr)
     sym->module_sect_attrs_ = offsetof(struct module, sect_attrs);
     sym->module_attribute_size_ = sizeof(struct module_attribute);
     sym->attribute_group_size_ = sizeof(struct attribute_group);
-    sym->pcpu_current_task_ = (uint32_t)kallsyms_lookup_name("current_task");
+    sym->pcpu_current_task_ = (uint32_t)KFN_PTR("current_task");
 
     sym->task_size = sizeof(struct task_struct);
     sym->task_state = offsetof(struct task_struct, state);
@@ -366,6 +386,12 @@ static struct notifier_block kgb_module_load_nb = {
 int kgb_init(void)
 {
     int ret = 0;
+
+#ifdef KPROBE_LOOKUP
+    register_kprobe(&kp);
+    kallsyms_lookup_name_ptr = (kallsyms_lookup_name_t) kp.addr;
+    unregister_kprobe(&kp);
+#endif
 
     ret = kgb_plant();
     if(ret !=0 )

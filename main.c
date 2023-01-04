@@ -18,6 +18,11 @@ Author: GEDU Shanghai Lab(GSL)
 #include <linux/mm.h> 
 #include <linux/uaccess.h>
 #include <linux/kgdb.h>
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+#define HAVE_PROC_OPS
+#endif
 
 static struct proc_dir_entry* proc_ndb_entry = NULL;
 extern ndb_mailbox_t* g_ptr_mailbox;
@@ -121,11 +126,19 @@ static ssize_t proc_ndb_write(struct file* file, const char __user * buffer,
 
     return count;
 }
+
+#ifdef HAVE_PROC_OPS
+static const struct proc_ops proc_ndb_fops = {
+ .proc_read = proc_ndb_read,
+ .proc_write = proc_ndb_write,
+};
+#else
 static const struct file_operations proc_ndb_fops = {
  .owner = THIS_MODULE,
  .read = proc_ndb_read,
  .write = proc_ndb_write,
 };
+#endif
 
 static int __init ndb_init(void)
 {
