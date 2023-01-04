@@ -27,7 +27,7 @@ Author: GEDU Shanghai Lab(GSL)
 static struct proc_dir_entry* proc_ndb_entry = NULL;
 extern ndb_mailbox_t* g_ptr_mailbox;
 #define NDB_VER_MAJOR 1
-#define NDB_VER_MINOR  7
+#define NDB_VER_MINOR 8
 
 static int ndb_test_percpu(void)
 {
